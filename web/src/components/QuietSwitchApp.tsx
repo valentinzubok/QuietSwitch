@@ -5,6 +5,7 @@ import {
   CHAIN_ID,
   CONTRACT_ADDRESS,
   CONTRACT_REPO,
+  DEFAULT_INTERVAL,
   DEMO_HEARTBEAT,
   DEMO_NOTE,
   DEMO_RULE,
@@ -17,12 +18,14 @@ import {
   arm,
   check,
   disarm,
+  getCadence,
   getEvents,
   getOwner,
   getStats,
   getSwitch,
   listIds,
   rearm,
+  type Cadence,
   type EventRow,
   type Stats,
   type SwitchRow,
@@ -35,6 +38,7 @@ const shortHash = (h: string) => (h ? `${h.slice(0, 16)}…` : "—");
 
 const RESULT: Record<string, { text: string; tone: string }> = {
   armed: { text: "armed", tone: "neutral" },
+  outage_noted: { text: "outage noted · not counted", tone: "broken" },
   alive: { text: "proof of life", tone: "ok" },
   missed: { text: "missed a check-in", tone: "broken" },
   unreachable: { text: "heartbeat unreadable", tone: "broken" },
@@ -88,6 +92,8 @@ export function QuietSwitchApp() {
   const [successor, setSuccessor] = useState("");
   const [note, setNote] = useState(DEMO_NOTE);
   const [misses, setMisses] = useState("2");
+  const [interval, setInterval] = useState(DEFAULT_INTERVAL);
+  const [cadence, setCadence] = useState<Record<string, Cadence>>({});
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -103,6 +109,12 @@ export function QuietSwitchApp() {
       setEvents(ev.slice(-8).reverse());
       const loaded = await Promise.all(ids.map((id) => getSwitch(id)));
       setRows((loaded.filter(Boolean) as SwitchRow[]).reverse());
+      const cadences = await Promise.all(ids.map((id) => getCadence(id)));
+      setCadence(
+        Object.fromEntries(
+          cadences.filter(Boolean).map((c) => [(c as Cadence).switch_id, c as Cadence]),
+        ),
+      );
       if (address) setGen(await getNativeBalance(address));
     } catch (e) {
       setMsg(`Error: ${e instanceof Error ? e.message : "read failed"}`);
@@ -269,6 +281,15 @@ export function QuietSwitchApp() {
           <textarea id="note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
           <label htmlFor="misses">Consecutive misses before it fires</label>
           <input id="misses" value={misses} onChange={(e) => setMisses(e.target.value)} />
+          <label htmlFor="interval">Observation interval (seconds)</label>
+          <input id="interval" value={interval} onChange={(e) => setInterval(e.target.value)} />
+          <p className="muted">
+            The cadence a counted miss must respect. The chain clock is split into windows of
+            this length and each window yields at most one counted observation, so nobody can
+            turn one outage into a handover by calling check repeatedly. {misses} misses
+            therefore need {misses} separated windows — and a transient outage needs two of
+            them, because the first is only noted.
+          </p>
           <button
             disabled={disabled || !switchId || !successor || !rule}
             onClick={() =>
@@ -282,6 +303,7 @@ export function QuietSwitchApp() {
                   successor,
                   note,
                   misses,
+                  interval,
                   onStage,
                 ),
               )
@@ -309,6 +331,10 @@ export function QuietSwitchApp() {
               rule — a stale date, a placeholder, an error message.
             </li>
             <li>
+              <span className="tag broken">outage noted</span> the first unreachable observation
+              is recorded without counting: a two-minute blip is not silence.
+            </li>
+            <li>
               <span className="tag broken">heartbeat unreadable</span> gone or empty. A heartbeat
               nobody can read is not a heartbeat, so it counts as silence — with the reason
               recorded.
@@ -322,7 +348,9 @@ export function QuietSwitchApp() {
             Firing takes something away from the current holder, so the fail-safe direction is the
             opposite of a monitor: a malformed model answer, a model error or a consensus failure
             <strong> reverts the transaction</strong>. Not even a miss is recorded when the
-            pipeline misbehaves.
+            pipeline misbehaves — and a second check inside the same observation window reverts
+            before the page is even fetched, so the same outage cannot be replayed into extra
+            misses.
           </p>
         </section>
       </div>
@@ -344,6 +372,17 @@ export function QuietSwitchApp() {
               <p className="claimtext">“{r.rule}”</p>
               <p className="hashline">
                 heartbeat <a href={r.heartbeat_url}>{r.heartbeat_url}</a>
+              </p>
+              <p className="hashline">
+                every {Math.round((r.observation_interval || 86400) / 60)} min at most ·{" "}
+                {cadence[r.switch_id]
+                  ? cadence[r.switch_id].open_now
+                    ? "a new observation window is open"
+                    : `window closed until ${new Date(
+                        cadence[r.switch_id].next_window_opens_at * 1000,
+                      ).toISOString().replace("T", " ").slice(0, 16)} UTC`
+                  : "cadence loading…"}
+                {r.outage_pending && " · one outage noted, not yet counted"}
               </p>
               <p className="hashline">
                 holder <code>{short(r.holder)}</code> → successor{" "}
@@ -369,10 +408,16 @@ export function QuietSwitchApp() {
               )}
               <button
                 className="ghost"
-                disabled={disabled || r.status !== "armed"}
+                disabled={
+                  disabled ||
+                  r.status !== "armed" ||
+                  (cadence[r.switch_id] ? !cadence[r.switch_id].open_now : false)
+                }
                 onClick={() => void run("check", () => check(acct, provider, r.switch_id, onStage))}
               >
-                check liveness
+                {cadence[r.switch_id] && !cadence[r.switch_id].open_now
+                  ? "window closed"
+                  : "check liveness"}
               </button>
               {address && address.toLowerCase() === r.holder.toLowerCase() && (
                 <button

@@ -1,6 +1,6 @@
 /** Live QuietSwitch deploy on GenLayer Studio Dev (chain 61997). Override via env. */
 export const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_QUIETSWITCH_ADDRESS ||
-  "0x9643Cc2Fd2ae27E2cBa77f653BBc58bcDa296f51") as `0x${string}`;
+  "0x7ACfde1Bb69023B903d599495719ad6736e5f21e") as `0x${string}`;
 
 /** Studio Dev / Studio Next — chain ID 61997. */
 export const CHAIN_ID = 61997;
@@ -20,5 +20,8 @@ export const DEMO_HEARTBEAT =
 export const DEMO_STALE = "https://valentinzubok.github.io/QuietSwitch/fixtures/stale.html";
 export const DEMO_RULE =
   "The page must state a check-in dated no earlier than September 2026.";
+/** Seconds per observation window: one counted miss per window, at most. */
+export const DEFAULT_INTERVAL = "86400";
+
 export const DEMO_NOTE =
   "Rotate the signing key with runbook 7; the recovery shard is with the notary.";

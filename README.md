@@ -28,15 +28,17 @@ arm(switch_id, heartbeat_url, rule, successor, note, misses_required)
       all fixed here, by the holder. Nothing about the firing condition can be chosen later.
 
 check(switch_id)                     anyone may call it — a switch only the holder can check
-                                     is not a dead-man's switch
+                                     is not a dead-man's switch — but at most once per
+                                     observation window: a second call inside the same
+                                     window reverts before the page is even fetched
       validators fetch THE COMMITTED PAGE (this function takes no URL), freeze it under
       eq_principle.strict_eq, and agree on one boolean: does it show proof of life that
       satisfies the rule?
         alive        -> the miss counter resets to zero
         not alive    -> one miss; after `misses_required` consecutive misses the switch FIRES
                         and the successor becomes the holder of the handover note
-        unreachable  -> counted as silence, with the reason recorded: a heartbeat nobody can
-                        read is not a heartbeat
+        unreachable  -> the FIRST outage is only noted, never counted; an outage that
+                        persists into another window counts, because a blip is not silence
 
 disarm / rearm(switch_id)            holder only; a fired switch cannot be disarmed
 ```
@@ -50,7 +52,10 @@ transaction**. Not even a miss is recorded when the pipeline misbehaves.
 | Risk | What stops it |
 |---|---|
 | The successor points the check at a blank page | `check()` takes no URL and no rule; both are fixed at `arm()`. |
-| A single bad model answer fires the switch | `misses_required` consecutive misses, and each one needs its own transaction and its own consensus. |
+| Hammering `check()` to turn one outage into a handover | Every switch carries an `observation_interval` fixed at `arm()`. The transaction clock is split into windows of that length and `last_window` is stored on chain: a second check inside a window reverts *before* the page is fetched. One window, at most one counted observation. |
+| A transient outage firing an irreversible handover | The first unreachable observation is `outage_noted`, not counted; only an outage that persists into a different window costs a miss, and a page that returns clears it. |
+| Paying a fee for a call that cannot count | `get_cadence(switch_id)` is a free view: whether a window is open, when the next one starts, the pending-outage flag. |
+| A single bad model answer fires the switch | `misses_required` consecutive misses, each in its own separated window, each with its own transaction and its own consensus. |
 | `bool("")` is `False` | `literal_bool()` accepts only JSON `true`/`false`; anything else reverts, recording nothing. |
 | An abandoned page that still returns 200 | The rule is judged on substance — a stale date, a placeholder or an error message is not proof of life. |
 | A holder faking liveness at the model | The page and the rule are fenced as untrusted data, inner fences neutralized, and injection phrasing is flagged to the model and stored on the switch. |
@@ -63,7 +68,7 @@ transaction**. Not even a miss is recorded when the pipeline misbehaves.
 |---|---|
 | Console | **https://valentinzubok.github.io/QuietSwitch/** (reads work with no wallet) |
 | Network | GenLayer Studio Dev / Studio Next — chain `61997` |
-| Contract | [`0x9643Cc2Fd2ae27E2cBa77f653BBc58bcDa296f51`](https://explorer-studio-dev.genlayer.com/address/0x9643Cc2Fd2ae27E2cBa77f653BBc58bcDa296f51) |
+| Contract | [`0x7ACfde1Bb69023B903d599495719ad6736e5f21e`](https://explorer-studio-dev.genlayer.com/address/0x7ACfde1Bb69023B903d599495719ad6736e5f21e) |
 | Contract-only repo | [QuietSwitchCore](https://github.com/valentinzubok/QuietSwitchCore) |
 | Deploy record | [`STUDIO_DEV_DEPLOY.md`](STUDIO_DEV_DEPLOY.md) |
 
@@ -96,13 +101,17 @@ npm run dev      # http://localhost:3015
 
 ```bash
 pip install -r requirements-dev.txt
-python3 -m pytest -q      # 32 tests
+python3 -m pytest -q      # 40 tests
 ```
 
 `tests/test_adversarial.py` is the half that matters: twelve malformed or non-boolean model
 outputs, model errors, a consensus failure on a switch that is one miss from firing, the successor
 trying to disarm or redirect the check, prompt injection on the heartbeat page and in the rule, a
-check-in buried 6 KB into a document, digest bounds and determinism, and a stale check-in.
+check-in buried 6 KB into a document, digest bounds and determinism, a stale check-in — and the
+amplification cases: a second check in the same window reverts without fetching anything, firing
+needs as many separated windows as `misses_required`, one second short of a window is not a window,
+and a transient outage polled by three different callers neither fires a one-miss switch nor leaves
+a trace once the page returns.
 
 ## License
 

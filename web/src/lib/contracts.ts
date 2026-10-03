@@ -11,6 +11,10 @@ export type SwitchRow = {
   status: string;
   misses: number;
   misses_required: number;
+  observation_interval: number;
+  last_check_at: number;
+  last_window: number;
+  outage_pending: boolean;
   checks: number;
   last_result: string;
   last_page_hash: string;
@@ -20,6 +24,26 @@ export type SwitchRow = {
 };
 
 export type EventRow = { kind: string; [key: string]: unknown };
+
+export type Cadence = {
+  switch_id: string;
+  observation_interval: number;
+  now: number;
+  window: number;
+  last_window: number;
+  last_check_at: number;
+  open_now: boolean;
+  next_window_opens_at: number;
+  outage_pending: boolean;
+  misses: number;
+  misses_required: number;
+};
+
+/** When this switch may next be observed — read it before paying a fee for a check. */
+export async function getCadence(switchId: string): Promise<Cadence | null> {
+  const raw = await readContract<string>(CONTRACT_ADDRESS, "get_cadence", [switchId]);
+  return parseJson<Cadence | null>(raw, null);
+}
 
 export type Stats = {
   switches: number;
@@ -67,6 +91,7 @@ export async function arm(
   successor: string,
   note: string,
   missesRequired: string,
+  observationInterval: string,
   onStage?: (stage: TxStage, hash: string) => void,
 ) {
   return writeAndWait(
@@ -74,7 +99,7 @@ export async function arm(
     provider,
     CONTRACT_ADDRESS,
     "arm",
-    [switchId, heartbeatUrl, rule, successor, note, missesRequired],
+    [switchId, heartbeatUrl, rule, successor, note, missesRequired, observationInterval],
     onStage,
   );
 }
