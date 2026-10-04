@@ -20,7 +20,6 @@ import {
   disarm,
   getCadence,
   getEvents,
-  getOwner,
   getStats,
   getSwitch,
   listIds,
@@ -77,7 +76,6 @@ export function QuietSwitchApp() {
   const [rows, setRows] = useState<SwitchRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [owner, setOwner] = useState("");
   const [gen, setGen] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -98,13 +96,11 @@ export function QuietSwitchApp() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [ids, o, s, ev] = await Promise.all([
+      const [ids, s, ev] = await Promise.all([
         listIds(),
-        getOwner(),
         getStats(),
         getEvents(),
       ]);
-      setOwner(o);
       setStats(s);
       setEvents(ev.slice(-8).reverse());
       const loaded = await Promise.all(ids.map((id) => getSwitch(id)));
@@ -197,8 +193,8 @@ export function QuietSwitchApp() {
             )}
           </div>
           <p className="muted" style={{ marginTop: "0.8rem" }}>
-            Contract <a href={EXPLORER}>{short(CONTRACT_ADDRESS, 12)}</a> · owner{" "}
-            <code>{short(owner)}</code> · <a href={CONTRACT_REPO}>contract source</a> ·{" "}
+            Contract <a href={EXPLORER}>{short(CONTRACT_ADDRESS, 12)}</a> · no owner, no admin ·{" "}
+            <a href={CONTRACT_REPO}>contract source</a> ·{" "}
             <a href={GITHUB}>this console</a>
           </p>
           <div>
@@ -246,7 +242,8 @@ export function QuietSwitchApp() {
           <p className="muted">
             The page, the rule, the successor and the number of consecutive misses are all fixed
             here, by you. Nothing about the firing condition can be chosen later — not by the
-            successor, not by the contract owner.
+            successor, and not by an administrator: this contract has no owner, so only you can
+            disarm or rearm your switch.
           </p>
           <label htmlFor="switchId">Switch id</label>
           <input id="switchId" value={switchId} onChange={(e) => setSwitchId(e.target.value)} />
@@ -284,11 +281,11 @@ export function QuietSwitchApp() {
           <label htmlFor="interval">Observation interval (seconds)</label>
           <input id="interval" value={interval} onChange={(e) => setInterval(e.target.value)} />
           <p className="muted">
-            The cadence a counted miss must respect. The chain clock is split into windows of
-            this length and each window yields at most one counted observation, so nobody can
-            turn one outage into a handover by calling check repeatedly. {misses} misses
-            therefore need {misses} separated windows — and a transient outage needs two of
-            them, because the first is only noted.
+            The minimum time between two accepted checks. The first check waits this long after
+            arming and every later one waits this long after the previous accepted check, so
+            nobody can hurry a handover by calling check repeatedly or by straddling a boundary.
+            {" "}{misses} misses therefore take at least {misses} full intervals — and a transient
+            outage needs one more, because the first is only noted.
           </p>
           <button
             disabled={disabled || !switchId || !successor || !rule}
@@ -348,7 +345,7 @@ export function QuietSwitchApp() {
             Firing takes something away from the current holder, so the fail-safe direction is the
             opposite of a monitor: a malformed model answer, a model error or a consensus failure
             <strong> reverts the transaction</strong>. Not even a miss is recorded when the
-            pipeline misbehaves — and a second check inside the same observation window reverts
+            pipeline misbehaves — and a check that arrives before the interval has elapsed reverts
             before the page is even fetched, so the same outage cannot be replayed into extra
             misses.
           </p>
@@ -377,9 +374,9 @@ export function QuietSwitchApp() {
                 every {Math.round((r.observation_interval || 86400) / 60)} min at most ·{" "}
                 {cadence[r.switch_id]
                   ? cadence[r.switch_id].open_now
-                    ? "a new observation window is open"
-                    : `window closed until ${new Date(
-                        cadence[r.switch_id].next_window_opens_at * 1000,
+                    ? "the interval has elapsed: a check is accepted now"
+                    : `next check accepted from ${new Date(
+                        cadence[r.switch_id].next_check_at * 1000,
                       ).toISOString().replace("T", " ").slice(0, 16)} UTC`
                   : "cadence loading…"}
                 {r.outage_pending && " · one outage noted, not yet counted"}
@@ -416,7 +413,7 @@ export function QuietSwitchApp() {
                 onClick={() => void run("check", () => check(acct, provider, r.switch_id, onStage))}
               >
                 {cadence[r.switch_id] && !cadence[r.switch_id].open_now
-                  ? "window closed"
+                  ? "interval not elapsed"
                   : "check liveness"}
               </button>
               {address && address.toLowerCase() === r.holder.toLowerCase() && (

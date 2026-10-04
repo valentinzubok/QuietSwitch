@@ -12,8 +12,10 @@ export type SwitchRow = {
   misses: number;
   misses_required: number;
   observation_interval: number;
+  armed_at: number;
+  cadence_anchor: number;
   last_check_at: number;
-  last_window: number;
+  observations: number;
   outage_pending: boolean;
   checks: number;
   last_result: string;
@@ -29,11 +31,12 @@ export type Cadence = {
   switch_id: string;
   observation_interval: number;
   now: number;
-  window: number;
-  last_window: number;
+  cadence_anchor: number;
   last_check_at: number;
+  observations: number;
   open_now: boolean;
-  next_window_opens_at: number;
+  next_check_at: number;
+  seconds_until_open: number;
   outage_pending: boolean;
   misses: number;
   misses_required: number;
@@ -76,10 +79,6 @@ export async function getStats(): Promise<Stats | null> {
     await readContract<string>(CONTRACT_ADDRESS, "get_stats", []),
     null,
   );
-}
-
-export async function getOwner(): Promise<string> {
-  return (await readContract<string>(CONTRACT_ADDRESS, "get_owner", [])) || "";
 }
 
 export async function arm(
